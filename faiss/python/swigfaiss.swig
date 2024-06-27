@@ -304,6 +304,7 @@ void gpu_sync_all_devices();
 #include <faiss/gpu/GpuIndicesOptions.h>
 #include <faiss/gpu/GpuClonerOptions.h>
 #include <faiss/gpu/GpuIndex.h>
+#include <faiss/gpu/GpuIndexCagra.h>
 #include <faiss/gpu/GpuIndexFlat.h>
 #include <faiss/gpu/GpuIndexIVF.h>
 #include <faiss/gpu/GpuIndexIVFPQ.h>
@@ -557,6 +558,9 @@ struct faiss::simd16uint16 {};
 %include  <faiss/gpu/GpuIndicesOptions.h>
 %include  <faiss/gpu/GpuClonerOptions.h>
 %include  <faiss/gpu/GpuIndex.h>
+#ifdef FAISS_ENABLE_RAFT
+%include  <faiss/gpu/GpuIndexCagra.h>
+#endif
 %include  <faiss/gpu/GpuIndexFlat.h>
 %include  <faiss/gpu/GpuIndexIVF.h>
 %include  <faiss/gpu/GpuIndexIVFPQ.h>
@@ -673,6 +677,9 @@ struct faiss::simd16uint16 {};
     DOWNCAST ( IndexRowwiseMinMax )
     DOWNCAST ( IndexRowwiseMinMaxFP16 )
 #ifdef GPU_WRAPPER
+#ifdef FAISS_ENABLE_RAFT
+    DOWNCAST_GPU ( GpuIndexCagra )
+#endif
     DOWNCAST_GPU ( GpuIndexIVFPQ )
     DOWNCAST_GPU ( GpuIndexIVFFlat )
     DOWNCAST_GPU ( GpuIndexIVFScalarQuantizer )
@@ -1041,7 +1048,9 @@ PyObject *swig_ptr (PyObject *a)
     PyErr_SetString(PyExc_ValueError, "did not recognize array type");
     return NULL;
 }
+%}
 
+%inline %{
 
 struct PythonInterruptCallback: faiss::InterruptCallback {
 
@@ -1056,15 +1065,18 @@ struct PythonInterruptCallback: faiss::InterruptCallback {
         return err == -1;
     }
 
+    static void reset() {
+        faiss::InterruptCallback::instance.reset(new PythonInterruptCallback());
+    }
 };
+
 %}
 
 %init %{
     /* needed, else crash at runtime */
     import_array();
 
-    faiss::InterruptCallback::instance.reset(new PythonInterruptCallback());
-
+    PythonInterruptCallback::reset();
 %}
 
 // return a pointer usable as input for functions that expect pointers
