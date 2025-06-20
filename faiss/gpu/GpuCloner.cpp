@@ -28,14 +28,13 @@
 #include <faiss/gpu/GpuIndex.h>
 #include <faiss/gpu/GpuIndexBinaryFlat.h>
 #if defined USE_NVIDIA_CUVS
+#include <faiss/gpu/GpuIndexBinaryCagra.h>
 #include <faiss/gpu/GpuIndexCagra.h>
 #endif
 #include <faiss/gpu/GpuIndexFlat.h>
 #include <faiss/gpu/GpuIndexIVFFlat.h>
 #include <faiss/gpu/GpuIndexIVFPQ.h>
 #include <faiss/gpu/GpuIndexIVFScalarQuantizer.h>
-#include <faiss/gpu/utils/DeviceUtils.h>
-#include <faiss/impl/FaissAssert.h>
 #include <faiss/index_io.h>
 
 namespace faiss {
@@ -95,6 +94,9 @@ Index* ToCPUCloner::clone_Index(const Index* index) {
 #if defined USE_NVIDIA_CUVS
     else if (auto icg = dynamic_cast<const GpuIndexCagra*>(index)) {
         IndexHNSWCagra* res = new IndexHNSWCagra();
+        if (icg->get_numeric_type() == faiss::NumericType::Float16) {
+            res->base_level_only = true;
+        }
         icg->copyTo(res);
         return res;
     }
@@ -236,7 +238,7 @@ Index* ToGpuCloner::clone_Index(const Index* index) {
         config.device = device;
         GpuIndexCagra* res =
                 new GpuIndexCagra(provider, icg->d, icg->metric_type, config);
-        res->copyFrom(icg);
+        res->copyFrom(icg, icg->get_numeric_type());
         return res;
     }
 #endif
@@ -527,7 +529,15 @@ faiss::IndexBinary* index_binary_gpu_to_cpu(
         IndexBinaryFlat* ret = new IndexBinaryFlat();
         ii->copyTo(ret);
         return ret;
-    } else {
+    }
+#if defined USE_NVIDIA_CUVS
+    else if (auto ii = dynamic_cast<const GpuIndexBinaryCagra*>(gpu_index)) {
+        IndexBinaryHNSW* ret = new IndexBinaryHNSW();
+        ii->copyTo(ret);
+        return ret;
+    }
+#endif
+    else {
         FAISS_THROW_MSG("cannot clone this type of index");
     }
 }
@@ -540,11 +550,19 @@ faiss::IndexBinary* index_binary_cpu_to_gpu(
     if (auto ii = dynamic_cast<const IndexBinaryFlat*>(index)) {
         GpuIndexBinaryFlatConfig config;
         config.device = device;
-        if (options) {
-            config.use_cuvs = options->use_cuvs;
-        }
         return new GpuIndexBinaryFlat(provider, ii, config);
-    } else {
+    }
+#if defined USE_NVIDIA_CUVS
+    else if (auto ii = dynamic_cast<const faiss::IndexBinaryHNSW*>(index)) {
+        GpuIndexCagraConfig config;
+        config.device = device;
+        GpuIndexBinaryCagra* res =
+                new GpuIndexBinaryCagra(provider, ii->d, config);
+        res->copyFrom(ii);
+        return res;
+    }
+#endif
+    else {
         FAISS_THROW_MSG("cannot clone this type of index");
     }
 }
